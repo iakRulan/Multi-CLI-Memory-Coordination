@@ -14,21 +14,23 @@
 
 ## 解决方案
 
-在项目中维护一个 `.task-context.md` 文件，记录任务全貌。Shell 快捷函数在调用工具时自动注入上下文：
+在项目中维护一个 `.task-context.md` 文件，记录任务全貌。Shell 快捷函数启动**原生交互式**会话并自动携带上下文（不是一次性 `-p` 调用）：
 
 ```
-cc "优化这个函数"   → Claude 读取上下文 + 执行
-co "写单元测试"     → Codex 读取同一上下文 + 执行
-ck "看看这段代码"   → Kimi 读取同一上下文 + 执行
+cc            → 启动 Claude 交互式会话，自动带上任务上下文
+ck            → 启动 Kimi  交互式会话，自动带上任务上下文
+co            → 启动 Codex 交互式会话，自动带上任务上下文
 ```
+
+注入机制按各 CLI 的原生能力：Claude 用 `--append-system-prompt`（不改任何文件）；Kimi/Codex 原生读取 `AGENTS.md`，故把上下文写入其中一个带标记的「受管块」。原生参数透传，例如 `cc -c` 续接上次会话、`cc -p "快速问题"` 仍可一次性调用。
 
 ## 安装
 
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/iakRulan/task-context-relay.git
-cd task-context-relay
+git clone https://github.com/iakRulan/Multi-CLI-Memory-Coordination.git
+cd Multi-CLI-Memory-Coordination
 ```
 
 ### 2. 配置 Shell
@@ -57,9 +59,11 @@ source /path/to/task-context-relay/references/shell-functions.sh
 
 | 命令 | 作用 |
 |------|------|
-| `cc <指令>` | 调用 Claude CLI，自动注入上下文 |
-| `co <指令>` | 调用 Codex CLI，自动注入上下文 |
-| `ck <指令>` | 调用 Kimi CLI，自动注入上下文 |
+| `cc [参数]` | 启动 Claude **交互式**会话 + 上下文（透传原生参数，如 `cc -c`、`cc -p "q"`） |
+| `co [参数]` | 启动 Codex **交互式**会话 + 上下文（经 `AGENTS.md` 受管块） |
+| `ck [参数]` | 启动 Kimi **交互式**会话 + 上下文（经 `AGENTS.md` 受管块） |
+| `ctx-sync` | 把上下文写入 `AGENTS.md` / `CLAUDE.md` 受管块，之后直接敲裸 `claude`/`kimi`/`codex` 也带上下文 |
+| `ctx-unsync` | 清除上述受管块 |
 | `ctx` | 查看当前上下文摘要 |
 | `ctx-edit` | 编辑上下文文件（不存在则创建） |
 | `ctx-init` | 在当前目录初始化上下文模板 |
@@ -78,13 +82,13 @@ ctx-init
 # 3. 编辑上下文（填写任务目标、背景等）
 ctx-edit
 
-# 4. 使用某个 AI 工具
-cc "帮我优化这个函数的性能"
+# 4. 启动 Claude 交互式会话（已带上下文，可自由多轮对话）
+cc
 
-# 5. 手动将关键结论追加到 .task-context.md
+# 5. 退出后，手动将关键结论追加到 .task-context.md（或让 AI 帮你更新）
 
 # 6. 切换工具继续，上下文无缝衔接
-co "为优化后的函数写单元测试"
+ck            # 启动 Kimi 交互式会话，读取同一份上下文
 ```
 
 ### 查看上下文状态
@@ -155,10 +159,12 @@ Last updated: 2026-06-23 23:00:00
                      └─────────────┘
 
 cc/co/ck 命令自动:
-1. 向上查找 .task-context.md
+1. 向上查找 .task-context.md（找不到则回退到 ~/.task-context.md）
 2. 读取文件内容
-3. 拼接到用户指令前面
-4. 调用对应 CLI 工具
+3. 按各 CLI 原生能力注入上下文:
+   - Claude → --append-system-prompt（不改任何文件）
+   - Kimi/Codex → 写入 AGENTS.md 受管块（原生读取）
+4. 启动对应 CLI 的「交互式」会话（原生参数透传）
 ```
 
 ## 项目结构
@@ -178,9 +184,9 @@ task-context-relay/
 
 ## 设计原则
 
+- **原生优先** — 启动各 CLI 的原生交互式会话，按其原生能力注入上下文（Claude `--append-system-prompt`、Kimi/Codex `AGENTS.md`），原生参数全部透传
 - **零依赖** — 不需要额外安装，纯 Shell 函数
-- **显式控制** — 用户决定何时更新上下文，没有自动同步的副作用
-- **工具无关** — 任何支持 `-p` / `--prompt` 参数的 CLI 工具都可接入
+- **显式控制 + 可逆** — 用户决定何时更新上下文；写入 `AGENTS.md`/`CLAUDE.md` 的内容均放在带标记的受管块中，`ctx-unsync` 可一键清除，不污染你的手写内容
 - **纯文本** — Markdown 文件，Git 友好，可版本控制
 
 ## 环境变量

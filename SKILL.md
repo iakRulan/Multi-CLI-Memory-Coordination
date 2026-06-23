@@ -36,65 +36,37 @@ python ~/.qclaw/skills/task-context-relay/scripts/init_context.py
 
 ### 2. 配置 Shell 快捷函数
 
-将以下内容添加到 `~/.bashrc`、`~/.zshrc` 或 PowerShell profile：
+不必手抄函数，直接在 profile 中引用本 skill 的完整版脚本即可。
 
-**Bash/Zsh:**
-```bash
-# Claude CLI 带上下文
-cc() {
-    local ctx=""
-    if [ -f .task-context.md ]; then
-        ctx=$(cat .task-context.md)
-        echo "📋 已加载任务上下文 ($(wc -l < .task-context.md) 行)"
-    fi
-    claude "$@" -p "${ctx}\n\n---\n\n用户新指令: $*"
-}
+**PowerShell（推荐）** — 在 `$PROFILE` 中加入，然后重开终端或执行 `. $PROFILE`：
 
-# Codex CLI 带上下文
-co() {
-    local ctx=""
-    if [ -f .task-context.md ]; then
-        ctx=$(cat .task-context.md)
-        echo "📋 已加载任务上下文 ($(wc -l < .task-context.md) 行)"
-    fi
-    codex "$@" --prompt "${ctx}\n\n---\n\n用户新指令: $*"
-}
-```
-
-**PowerShell:**
 ```powershell
-# Claude CLI 带上下文
-function cc {
-    $ctx = ""
-    if (Test-Path .task-context.md) {
-        $ctx = Get-Content .task-context.md -Raw
-        $lines = (Get-Content .task-context.md).Count
-        Write-Host "📋 已加载任务上下文 ($lines 行)" -ForegroundColor Cyan
-    }
-    $input = $args -join " "
-    claude $input -p "$ctx`n`n---`n`n用户新指令: $input"
-}
-
-# Codex CLI 带上下文
-function co {
-    $ctx = ""
-    if (Test-Path .task-context.md) {
-        $ctx = Get-Content .task-context.md -Raw
-        $lines = (Get-Content .task-context.md).Count
-        Write-Host "📋 已加载任务上下文 ($lines 行)" -ForegroundColor Cyan
-    }
-    $input = $args -join " "
-    codex $input --prompt "$ctx`n`n---`n`n用户新指令: $input"
-}
+. "$HOME\.qclaw\skills\task-context-relay\references\shell-functions.ps1"
 ```
+
+**Bash / Zsh** — 在 `~/.bashrc` / `~/.zshrc` 中加入，然后重开终端或 `source`：
+
+```bash
+. "$HOME/.qclaw/skills/task-context-relay/references/shell-functions.sh"
+```
+
+> 这些脚本提供 `cc`/`ck`/`co`（启动**原生交互式**会话并自动注入上下文）以及 `ctx*` 管理命令。
+>
+> **注入机制**（按各 CLI 原生能力，保持交互）：
+> - **Claude** → `claude --append-system-prompt <上下文>`，上下文作为追加系统提示，不改任何文件
+> - **Kimi / Codex** → 它们无系统提示参数，但原生读取 `AGENTS.md`，故把上下文写入其中带标记的「受管块」；`ctx-unsync` 可一键清除，不动你的手写内容
+>
+> **原生参数透传**：`cc -c` 续接上次会话、`cc -p "快速问题"` 仍可一次性调用、`cc --model ...` 等同样可用。
+>
+> ⚠️ PowerShell 脚本须以 **UTF-8 (带 BOM)** 保存，否则 Windows PowerShell 5.1 会按 GBK 解析导致中文乱码或语法报错。
 
 ### 3. 使用流程
 
 ```
-1. 开始任务 → 创建/更新 .task-context.md
-2. 调用 cc "你的指令"  → Claude 读取上下文 + 执行
-3. 调用 co "你的指令"  → Codex 读取同一上下文 + 执行
-4. 手动将关键结论追加回 .task-context.md
+1. 开始任务 → 创建/更新 .task-context.md（ctx-init / ctx-edit）
+2. 运行 cc  → 启动 Claude 交互式会话，已带上下文，自由多轮对话
+3. 运行 ck  → 启动 Kimi 交互式会话，读取同一份上下文
+4. 退出后，将关键结论追加回 .task-context.md（手动或让 AI 帮你更新）
 5. 切换工具时，新进程自动读取同一文件，上下文无缝延续
 ```
 
@@ -153,8 +125,11 @@ function co {
 
 | 函数 | 作用 | 示例 |
 |------|------|------|
-| `cc [指令]` | 调用 Claude CLI，自动注入上下文 | `cc "优化这个函数"` |
-| `co [指令]` | 调用 Codex CLI，自动注入上下文 | `co "写单元测试"` |
+| `cc [参数]` | 启动 Claude **交互式**会话 + 上下文（原生参数透传） | `cc` / `cc -c` / `cc -p "q"` |
+| `ck [参数]` | 启动 Kimi **交互式**会话 + 上下文（经 `AGENTS.md`） | `ck` |
+| `co [参数]` | 启动 Codex **交互式**会话 + 上下文（经 `AGENTS.md`） | `co` |
+| `ctx-sync` | 把上下文写入 `AGENTS.md`/`CLAUDE.md` 受管块，裸 CLI 也带上下文 | `ctx-sync` |
+| `ctx-unsync` | 清除上述受管块 | `ctx-unsync` |
 | `ctx` | 查看当前上下文摘要 | `ctx` |
 | `ctx-edit` | 编辑上下文文件 | `ctx-edit` |
 | `ctx-clear` | 清空当前任务上下文 | `ctx-clear` |
@@ -203,8 +178,8 @@ git commit -m "docs: update task context"
 ## 设计原则
 
 1. **零成本**：不更换现有工具，不依赖外部服务
-2. **显式控制**：用户决定何时更新上下文，避免自动同步的副作用
-3. **工具无关**：任何支持命令行参数的 AI 工具都可接入
+2. **原生优先**：启动各 CLI 原生交互式会话，按其原生能力注入上下文（Claude `--append-system-prompt`、Kimi/Codex `AGENTS.md`），原生参数全部透传
+3. **显式控制 + 可逆**：用户决定何时更新上下文；写入 `AGENTS.md`/`CLAUDE.md` 的内容均在带标记的受管块中，`ctx-unsync` 可一键清除
 4. **可审计**：纯文本文件，版本控制友好，随时可查历史
 
 ## 参考文件
